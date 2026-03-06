@@ -25,12 +25,12 @@ while True:
     eyes = eyeCascade.detectMultiScale(regionGray, 1.1, 10)
 
     if len(eyes) > 0:
-        cv2.putText(frame, "Eyes Detected", (x, y-30), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.6, (0, 0, 255), 2)
+        cv2.putText(frame, "Eyes Detected", (x, y-30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
-    smile = smileCascade.detectMultiScale(regionGray, 1.7, 20)
+    smile = smileCascade.detectMultiScale(regionGray, 1.7, 15)
 
     if len(smile) > 0:
-        cv2.putText(frame, "Smiling", (x, y-20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.6, (255, 0, 0), 2)
+        cv2.putText(frame, "Smiling", (x, y+h+20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
     
     cv2.imshow("Webcam", frame)
