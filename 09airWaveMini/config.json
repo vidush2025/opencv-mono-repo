@@ -1,0 +1,32 @@
+{
+  "socket": {
+    "host": "127.0.0.1",
+    "port": 8888,
+    "reconnectIntervalSeconds": 2.0
+  },
+  "midi": {
+    "preferredDeviceName": "",
+    "defaultChannel": 0
+  },
+  "mappings": {
+    "pinch": {
+      "channel": 0,
+      "cc": 1,
+      "sendWhenInactive": false
+    },
+    "hand_height": {
+      "channel": 0,
+      "cc": 2,
+      "sendWhenInactive": true
+    },
+    "toggle": {
+      "channel": 0,
+      "cc": 3,
+      "sendWhenInactive": true
+    }
+  },
+  "thresholds": {
+    "pinchChange": 2,
+    "handHeightChange": 2
+  }
+}

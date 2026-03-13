@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class PythonReciever {
+public class PythonReceiver {
 	private static final Pattern GESTURE_PATTERN = Pattern.compile("\\\"gesture\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
 	private static final Pattern VALUE_PATTERN = Pattern.compile("\\\"value\\\"\\s*:\\s*(-?\\d+)");
 	private static final Pattern ACTIVE_PATTERN = Pattern.compile("\\\"active\\\"\\s*:\\s*(true|false)");
@@ -19,7 +19,7 @@ public class PythonReciever {
 	private volatile boolean running;
 	private ServerSocket serverSocket;
 
-	public PythonReciever(int port, GestureListener listener) {
+	public PythonReceiver(int port, GestureListener listener) {
 		this.port = port;
 		this.listener = listener;
 	}

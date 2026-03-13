@@ -1,4 +1,6 @@
 import cv2
+import json
+from pathlib import Path
 
 from communication.java_sender import JavaGestureSender
 from gestures.hand_position import HandPositionDetector
@@ -8,8 +10,22 @@ from tracking.hand_tracker import HandTracker
 from utils.math_utils import significant_change
 
 
-PINCH_CHANGE_THRESHOLD = 2
-HAND_HEIGHT_CHANGE_THRESHOLD = 2
+def load_thresholds():
+	default_pinch = 2
+	default_hand_height = 2
+
+	try:
+		config_path = Path(__file__).resolve().parents[1] / "config.json"
+		with config_path.open("r", encoding="utf-8") as config_file:
+			config = json.load(config_file)
+
+		thresholds = config.get("thresholds", {})
+		pinch_threshold = int(thresholds.get("pinchChange", default_pinch))
+		hand_height_threshold = int(thresholds.get("handHeightChange", default_hand_height))
+
+		return max(0, pinch_threshold), max(0, hand_height_threshold)
+	except Exception:
+		return default_pinch, default_hand_height
 
 
 def draw_status(frame, sender_connected, control_enabled, pinch_reading, hand_reading):
@@ -75,6 +91,8 @@ def draw_status(frame, sender_connected, control_enabled, pinch_reading, hand_re
 
 
 def main():
+	pinch_change_threshold, hand_height_change_threshold = load_thresholds()
+
 	camera = CameraStream()
 	hand_tracker = HandTracker(max_num_hands=1)
 	pinch_detector = PinchDetector()
@@ -110,7 +128,7 @@ def main():
 				if control_enabled and pinch_reading.active and significant_change(
 					last_pinch_value,
 					pinch_reading.midi_value,
-					PINCH_CHANGE_THRESHOLD,
+					pinch_change_threshold,
 				):
 					sender.send_gesture("pinch", pinch_reading.midi_value, True)
 					last_pinch_value = pinch_reading.midi_value
@@ -118,7 +136,7 @@ def main():
 				if control_enabled and significant_change(
 					last_hand_height_value,
 					hand_reading.midi_value,
-					HAND_HEIGHT_CHANGE_THRESHOLD,
+					hand_height_change_threshold,
 				):
 					sender.send_gesture("hand_height", hand_reading.midi_value, True)
 					last_hand_height_value = hand_reading.midi_value

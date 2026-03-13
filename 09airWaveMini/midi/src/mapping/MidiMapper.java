@@ -1,5 +1,6 @@
 package mapping;
 
+import config.Config;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -8,11 +9,28 @@ import midiController.MidiController;
 public class MidiMapper {
 	private final Map<String, Mapping> mappings;
 
-	public MidiMapper() {
+	public MidiMapper(Config config) {
 		mappings = new HashMap<String, Mapping>();
-		mappings.put("pinch", new Mapping(0, 1, false));
-		mappings.put("hand_height", new Mapping(0, 2, true));
-		mappings.put("toggle", new Mapping(0, 3, true));
+		addMapping(config, "pinch", 1, false);
+		addMapping(config, "hand_height", 2, true);
+		addMapping(config, "toggle", 3, true);
+	}
+
+	private void addMapping(Config config, String gestureName, int fallbackCc, boolean fallbackSendWhenInactive) {
+		Config.MappingConfig loadedMapping = config.getMapping(gestureName);
+		if (loadedMapping == null) {
+			mappings.put(gestureName, new Mapping(config.getDefaultChannel(), fallbackCc, fallbackSendWhenInactive));
+			return;
+		}
+
+		mappings.put(
+			gestureName,
+			new Mapping(
+				loadedMapping.getChannel(),
+				loadedMapping.getControllerNumber(),
+				loadedMapping.isSendWhenInactive()
+			)
+		);
 	}
 
 	public void handleGesture(String gesture, int value, boolean active, MidiController midiController) {
