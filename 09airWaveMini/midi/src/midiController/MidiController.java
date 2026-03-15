@@ -14,13 +14,19 @@ public class MidiController {
 	public void printAvailableOutputDevices() {
 		MidiDevice.Info[] deviceInfos = MidiSystem.getMidiDeviceInfo();
 
-		System.out.println("Available MIDI output devices:");
+		System.out.println("Available MIDI devices:");
+
 		for (MidiDevice.Info deviceInfo : deviceInfos) {
 			try {
 				MidiDevice device = MidiSystem.getMidiDevice(deviceInfo);
-				if (device.getMaxReceivers() != 0) {
-					System.out.println("- " + deviceInfo.getName() + " | " + deviceInfo.getDescription());
-				}
+
+				System.out.println(
+					"- " + deviceInfo.getName() +
+					" | " + deviceInfo.getDescription() +
+					" | Receivers: " + device.getMaxReceivers() +
+					" | Transmitters: " + device.getMaxTransmitters()
+				);
+
 			} catch (Exception exception) {
 				System.out.println("- Unable to inspect device: " + deviceInfo.getName());
 			}
@@ -38,10 +44,15 @@ public class MidiController {
 					continue;
 				}
 
-				if (preferredDeviceName != null
-					&& !preferredDeviceName.trim().isEmpty()
-					&& !deviceInfo.getName().toLowerCase().contains(preferredDeviceName.toLowerCase())) {
-					continue;
+				if (preferredDeviceName != null && !preferredDeviceName.trim().isEmpty()) {
+
+					String name = deviceInfo.getName().toLowerCase();
+					String description = deviceInfo.getDescription().toLowerCase();
+					String target = preferredDeviceName.toLowerCase();
+
+					if (!name.contains(target) && !description.contains(target)) {
+						continue;
+					}
 				}
 
 				device.open();

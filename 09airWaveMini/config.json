@@ -5,7 +5,7 @@
     "reconnectIntervalSeconds": 2.0
   },
   "midi": {
-    "preferredDeviceName": "",
+    "preferredDeviceName": "loopbe",
     "defaultChannel": 0
   },
   "mappings": {
