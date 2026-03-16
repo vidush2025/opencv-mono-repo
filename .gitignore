@@ -1,0 +1,127 @@
+# =========================
+
+# OS FILES
+
+# =========================
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+
+# IDE / EDITOR FILES
+
+# =========================
+
+.vscode/
+.idea/
+*.code-workspace
+*.iml
+
+# =========================
+
+# PYTHON
+
+# =========================
+
+**pycache**/
+*.pyc
+*.pyo
+*.pyd
+*.pyc.*
+*.pkl
+
+# Virtual environments
+
+venv/
+.env/
+.envrc
+.venv/
+
+# Python build artifacts
+
+build/
+dist/
+*.egg-info/
+
+# =========================
+
+# OPENCV / MEDIA OUTPUTS
+
+# =========================
+
+*.avi
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.png
+*.jpg
+*.jpeg
+
+# Keep sample media if needed
+
+!testmedia/
+!testmedia/**
+
+# =========================
+
+# JAVA
+
+# =========================
+
+*.class
+*.jar
+*.war
+*.ear
+
+# Java build folders
+
+out/
+target/
+bin/
+
+# =========================
+
+# MAVEN / GRADLE
+
+# =========================
+
+.gradle/
+build/
+
+# =========================
+
+# LOG FILES
+
+# =========================
+
+*.log
+
+# =========================
+
+# TEMP FILES
+
+# =========================
+
+*.tmp
+*.temp
+*.swp
+
+# =========================
+
+# MIDI / LOCAL CONFIG
+
+# =========================
+
+local_config.json
+device_config.json
+
+# =========================
+
+# NODE (if ever added)
+
+# =========================
+
+node_modules/
