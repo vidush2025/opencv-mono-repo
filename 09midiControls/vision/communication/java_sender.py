@@ -74,6 +74,18 @@ class JavaGestureSender:
             self.close()
             return False
 
+    def send_event(self, event_name, event_value):
+        if self._socket is None and not self.connect():
+            return False
+
+        try:
+            message = f"{event_name}:{event_value}\n"
+            self._socket.sendall(message.encode("utf-8"))
+            return True
+        except OSError:
+            self.close()
+            return False
+
     def close(self):
         if self._socket is not None:
             try:

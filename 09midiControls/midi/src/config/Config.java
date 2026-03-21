@@ -14,6 +14,9 @@ public class Config {
     private int port = 8888;
     private String preferredDeviceName = "";
     private int defaultChannel = 0;
+    private int[] faderControllerNumbers = new int[] {1, 2, 3, 4, 5};
+    private int resetValue = 127;
+    private int muteValue = 0;
     private final Map<String, MappingConfig> mappings = new HashMap<String, MappingConfig>();
 
     public Config() {
@@ -25,6 +28,9 @@ public class Config {
     public int getPort() { return port; }
     public String getPreferredDeviceName() { return preferredDeviceName; }
     public int getDefaultChannel() { return defaultChannel; }
+    public int[] getFaderControllerNumbers() { return faderControllerNumbers.clone(); }
+    public int getResetValue() { return resetValue; }
+    public int getMuteValue() { return muteValue; }
 
     public MappingConfig getMapping(String gestureName) {
         return mappings.get(gestureName);
@@ -83,10 +89,28 @@ public class Config {
             cfg.loadMapping(text, "pinch", 1, false);
             cfg.loadMapping(text, "hand_height", 2, true);
             cfg.loadMapping(text, "toggle", 3, true);
+            cfg.loadTwoHandConfig(text);
         } catch (IOException e) {
             // fall back to defaults
         }
         return cfg;
+    }
+
+    private void loadTwoHandConfig(String rawConfig) {
+        Pattern twoHandPattern = Pattern.compile("\"twoHand\"\\s*:\\s*\\{([\\s\\S]*?)\\}", Pattern.DOTALL);
+        Matcher twoHandMatcher = twoHandPattern.matcher(rawConfig);
+        if (!twoHandMatcher.find()) {
+            return;
+        }
+
+        String twoHandBody = twoHandMatcher.group(1);
+        int[] parsedControllers = extractIntArray(twoHandBody, "faderControllerNumbers", faderControllerNumbers);
+        if (parsedControllers.length > 0) {
+            faderControllerNumbers = parsedControllers;
+        }
+
+        resetValue = clamp(extractInt(twoHandBody, "resetValue", resetValue), 0, 127);
+        muteValue = clamp(extractInt(twoHandBody, "muteValue", muteValue), 0, 127);
     }
 
     private void loadMapping(String rawConfig, String gestureName, int defaultCc, boolean defaultSendWhenInactive) {
@@ -130,6 +154,40 @@ public class Config {
             return Boolean.parseBoolean(matcher.group(1));
         }
         return fallbackValue;
+    }
+
+    private int[] extractIntArray(String section, String key, int[] fallbackValue) {
+        Pattern pattern = Pattern.compile("\"" + Pattern.quote(key) + "\"\\s*:\\s*\\[([^\\]]*)\\]", Pattern.DOTALL);
+        Matcher matcher = pattern.matcher(section);
+        if (!matcher.find()) {
+            return fallbackValue;
+        }
+
+        String arrayBody = matcher.group(1).trim();
+        if (arrayBody.isEmpty()) {
+            return fallbackValue;
+        }
+
+        String[] parts = arrayBody.split(",");
+        int[] values = new int[parts.length];
+        int count = 0;
+
+        for (String part : parts) {
+            try {
+                int parsed = clamp(Integer.parseInt(part.trim()), 0, 127);
+                values[count] = parsed;
+                count++;
+            } catch (NumberFormatException ignored) {
+            }
+        }
+
+        if (count == 0) {
+            return fallbackValue;
+        }
+
+        int[] trimmed = new int[count];
+        System.arraycopy(values, 0, trimmed, 0, count);
+        return trimmed;
     }
 
     private static int clamp(int value, int min, int max) {

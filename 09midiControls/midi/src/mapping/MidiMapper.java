@@ -1,70 +1,156 @@
 package mapping;
 
 import config.Config;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Arrays;
 
 import midiController.MidiController;
 
 public class MidiMapper {
-	private final Map<String, Mapping> mappings;
+	private static final int GESTURE_SLOTS = 5;
+	private final int defaultChannel;
+	private final int[] controllerNumbers;
+	private final int[] faderValues;
+	private final int[] previousValues;
+	private final int[] lastSentValues;
+	private final int resetValue;
+	private final int muteValue;
+	private final int faderCount;
+	private int selectedLeftControl;
+	private int selectedRightControl;
+	private boolean muteState;
 
 	public MidiMapper(Config config) {
-		mappings = new HashMap<String, Mapping>();
-		addMapping(config, "pinch", 1, false);
-		addMapping(config, "hand_height", 2, true);
-		addMapping(config, "toggle", 3, true);
-	}
-
-	private void addMapping(Config config, String gestureName, int fallbackCc, boolean fallbackSendWhenInactive) {
-		Config.MappingConfig loadedMapping = config.getMapping(gestureName);
-		if (loadedMapping == null) {
-			mappings.put(gestureName, new Mapping(config.getDefaultChannel(), fallbackCc, fallbackSendWhenInactive));
-			return;
+		defaultChannel = config.getDefaultChannel();
+		int[] loadedControllers = config.getFaderControllerNumbers();
+		if (loadedControllers.length == 0) {
+			loadedControllers = new int[] {1, 2, 3, 4, 5};
 		}
-
-		mappings.put(
-			gestureName,
-			new Mapping(
-				loadedMapping.getChannel(),
-				loadedMapping.getControllerNumber(),
-				loadedMapping.isSendWhenInactive()
-			)
-		);
+		controllerNumbers = loadedControllers;
+		faderCount = controllerNumbers.length;
+		resetValue = clamp(config.getResetValue(), 0, 127);
+		muteValue = clamp(config.getMuteValue(), 0, 127);
+		faderValues = new int[faderCount];
+		previousValues = new int[faderCount];
+		lastSentValues = new int[faderCount];
+		Arrays.fill(faderValues, resetValue);
+		Arrays.fill(previousValues, resetValue);
+		Arrays.fill(lastSentValues, -1);
+		selectedLeftControl = 1;
+		// selectedRightControl = 1;
+		muteState = false;
 	}
 
 	public void handleGesture(String gesture, int value, boolean active, MidiController midiController) {
-		Mapping mapping = mappings.get(gesture);
-		if (mapping == null) {
+		if (gesture == null) {
 			return;
 		}
 
-		if (!mapping.sendWhenInactive && !active) {
+		if ("LEFT".equals(gesture)) {
+			handleLeftGesture(value, midiController);
 			return;
 		}
 
-		int outgoingValue = value;
-		if ("toggle".equals(gesture)) {
-			outgoingValue = active ? 127 : 0;
+		if ("RIGHT".equals(gesture)) {
+			// handleRightSelection(value);
+			return;
 		}
 
-		midiController.sendControlChange(mapping.channel, mapping.controllerNumber, outgoingValue);
-		System.out.println(
-			"Mapped gesture " + gesture
-				+ " -> CC " + mapping.controllerNumber
-				+ " value " + outgoingValue
-		);
+		if ("RIGHT_MOVE".equals(gesture)) {
+			handleRightMove(value, midiController);
+			return;
+		}
+
+		if ("BOTH".equals(gesture)) {
+			if (active) {
+				activateMute(midiController);
+			} else {
+				restoreFromMute(midiController);
+			}
+		}
 	}
 
-	private static class Mapping {
-		private final int channel;
-		private final int controllerNumber;
-		private final boolean sendWhenInactive;
-
-		private Mapping(int channel, int controllerNumber, boolean sendWhenInactive) {
-			this.channel = channel;
-			this.controllerNumber = controllerNumber;
-			this.sendWhenInactive = sendWhenInactive;
+	private void handleLeftGesture(int value, MidiController midiController) {
+		int normalized = clamp(value, 0, GESTURE_SLOTS);
+		if (normalized == 0) {
+			resetAllFaders(midiController);
+			return;
 		}
+
+		selectedLeftControl = normalized;
+		if (selectedLeftControl <= faderCount) {
+			sendFaderIfChanged(selectedLeftControl - 1, faderValues[selectedLeftControl - 1], midiController);
+		}
+	}
+
+	// private void handleRightSelection(int value) {
+	// 	selectedRightControl = clamp(value, 1, GESTURE_SLOTS);
+	// }
+
+	private void handleRightMove(int value, MidiController midiController) {
+		if (muteState) {
+			return;
+		}
+
+		int midiValue = clamp(value, 0, 127);
+
+		// Left hand selection decides target fader(s)
+		if (selectedLeftControl == GESTURE_SLOTS) {
+			for (int index = 0; index < faderCount; index++) {
+				setFaderValue(index, midiValue, midiController);
+			}
+			return;
+		}
+
+		if (selectedLeftControl <= faderCount) {
+			setFaderValue(selectedLeftControl - 1, midiValue, midiController);
+		}
+	}
+	private void activateMute(MidiController midiController) {
+		if (muteState) {
+			return;
+		}
+
+		for (int index = 0; index < faderCount; index++) {
+			previousValues[index] = faderValues[index];
+			setFaderValue(index, muteValue, midiController);
+		}
+		muteState = true;
+	}
+
+	private void restoreFromMute(MidiController midiController) {
+		if (!muteState) {
+			return;
+		}
+
+		for (int index = 0; index < faderCount; index++) {
+			setFaderValue(index, previousValues[index], midiController);
+		}
+		muteState = false;
+	}
+
+	private void resetAllFaders(MidiController midiController) {
+		for (int index = 0; index < faderCount; index++) {
+			setFaderValue(index, resetValue, midiController);
+		}
+	}
+
+	private void setFaderValue(int index, int value, MidiController midiController) {
+		int safeValue = clamp(value, 0, 127);
+		faderValues[index] = safeValue;
+		sendFaderIfChanged(index, safeValue, midiController);
+	}
+
+	private void sendFaderIfChanged(int index, int value, MidiController midiController) {
+		if (lastSentValues[index] == value) {
+			return;
+		}
+
+		midiController.sendControlChange(defaultChannel, controllerNumbers[index], value);
+		lastSentValues[index] = value;
+		System.out.println("Fader " + (index + 1) + " -> CC " + controllerNumbers[index] + " value " + value);
+	}
+
+	private int clamp(int value, int min, int max) {
+		return Math.max(min, Math.min(max, value));
 	}
 }

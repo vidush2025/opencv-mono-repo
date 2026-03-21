@@ -8,6 +8,11 @@
     "preferredDeviceName": "loopbe",
     "defaultChannel": 0
   },
+  "twoHand": {
+    "faderControllerNumbers": [1, 2, 3, 4, 5],
+    "resetValue": 127,
+    "muteValue": 0
+  },
   "mappings": {
     "pinch": {
       "channel": 0,
