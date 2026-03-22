@@ -10,6 +10,56 @@ from utils.math_utils import significant_change
 from utils.math_utils import normalize_vertical_to_midi
 
 
+MAX_CC_VALUE = int(round(127 * 0.8))
+
+
+class StableValue:
+	def __init__(self, frames_required=3):
+		self.frames_required = max(1, int(frames_required))
+		self._stable = None
+		self._candidate = None
+		self._count = 0
+
+	def update(self, value):
+		if value is None:
+			self._candidate = None
+			self._count = 0
+			return self._stable, False
+
+		if value != self._candidate:
+			self._candidate = value
+			self._count = 1
+		else:
+			self._count += 1
+
+		if self._count >= self.frames_required and self._stable != self._candidate:
+			self._stable = self._candidate
+			return self._stable, True
+
+		return self._stable, False
+
+	def clear(self):
+		self._stable = None
+		self._candidate = None
+		self._count = 0
+
+
+class EmaSmoother:
+	def __init__(self, alpha=0.35):
+		self.alpha = float(alpha)
+		self._value = None
+
+	def update(self, value):
+		if self._value is None:
+			self._value = float(value)
+		else:
+			self._value = (self.alpha * float(value)) + ((1.0 - self.alpha) * self._value)
+		return int(round(self._value))
+
+	def clear(self):
+		self._value = None
+
+
 def load_thresholds():
 	default_right_move = 2
 
@@ -24,6 +74,11 @@ def load_thresholds():
 		return max(0, right_move_threshold)
 	except Exception:
 		return default_right_move
+
+
+def _scale_to_cc_cap(value):
+	value = max(0, min(127, int(value)))
+	return int(round((value / 127.0) * MAX_CC_VALUE))
 
 
 def _classify_hands(detected_hands):
@@ -50,31 +105,67 @@ def _classify_hands(detected_hands):
 	return left_hand, right_hand
 
 
+def _distance(point_a, point_b):
+	delta_x = float(point_a[0] - point_b[0])
+	delta_y = float(point_a[1] - point_b[1])
+	return (delta_x * delta_x + delta_y * delta_y) ** 0.5
+
+
+def _is_thumb_up(landmarks, handedness):
+	thumb_tip = landmarks[hand_landmarks.THUMB_TIP]
+	thumb_ip = landmarks[hand_landmarks.THUMB_IP]
+	index_mcp = landmarks[hand_landmarks.INDEX_FINGER_MCP]
+
+	return _distance(thumb_tip, index_mcp) > (_distance(thumb_ip, index_mcp) + 8.0)
+
+
+def _is_fist(landmarks):
+	wrist = landmarks[hand_landmarks.WRIST]
+	middle_mcp = landmarks[hand_landmarks.MIDDLE_FINGER_MCP]
+	index_mcp = landmarks[hand_landmarks.INDEX_FINGER_MCP]
+	thumb_tip = landmarks[hand_landmarks.THUMB_TIP]
+
+	palm_size = max(1.0, _distance(wrist, middle_mcp))
+	finger_tips = [
+		hand_landmarks.INDEX_FINGER_TIP,
+		hand_landmarks.MIDDLE_FINGER_TIP,
+		hand_landmarks.RING_FINGER_TIP,
+		hand_landmarks.PINKY_TIP,
+	]
+	finger_mcps = [
+		hand_landmarks.INDEX_FINGER_MCP,
+		hand_landmarks.MIDDLE_FINGER_MCP,
+		hand_landmarks.RING_FINGER_MCP,
+		hand_landmarks.PINKY_MCP,
+	]
+
+	folded_fingers = 0
+	for tip_index, mcp_index in zip(finger_tips, finger_mcps):
+		tip_distance = _distance(landmarks[tip_index], wrist)
+		mcp_distance = _distance(landmarks[mcp_index], wrist)
+		if tip_distance < (mcp_distance + (0.25 * palm_size)):
+			folded_fingers += 1
+
+	thumb_folded = _distance(thumb_tip, index_mcp) < (0.9 * palm_size)
+	return folded_fingers >= 4 and thumb_folded
+
+
 def _count_fingers(landmarks, handedness):
-    thumb_tip = landmarks[hand_landmarks.THUMB_TIP]
-    thumb_mcp = landmarks[hand_landmarks.THUMB_MCP]
+	finger_pairs = [
+		(hand_landmarks.INDEX_FINGER_TIP, hand_landmarks.INDEX_FINGER_PIP),
+		(hand_landmarks.MIDDLE_FINGER_TIP, hand_landmarks.MIDDLE_FINGER_PIP),
+		(hand_landmarks.RING_FINGER_TIP, hand_landmarks.RING_FINGER_PIP),
+		(hand_landmarks.PINKY_TIP, hand_landmarks.PINKY_PIP),
+	]
 
-    # Distance from thumb MCP to tip = how extended the thumb is
-    dx = thumb_tip[0] - thumb_mcp[0]
-    dy = thumb_tip[1] - thumb_mcp[1]
-    thumb_extension = (dx**2 + dy**2)**0.5
-    
-    # Thumb is extended if distance is significant
-    thumb_up = thumb_extension > 25  # Adjust this threshold as needed
+	fingers_up = 1 if _is_thumb_up(landmarks, handedness) else 0
+	for tip_index, pip_index in finger_pairs:
+		if landmarks[tip_index][1] < (landmarks[pip_index][1] - 8):
+			fingers_up += 1
 
-    finger_pairs = [
-        (hand_landmarks.INDEX_FINGER_TIP, hand_landmarks.INDEX_FINGER_PIP),
-        (hand_landmarks.MIDDLE_FINGER_TIP, hand_landmarks.MIDDLE_FINGER_PIP),
-        (hand_landmarks.RING_FINGER_TIP, hand_landmarks.RING_FINGER_PIP),
-        (hand_landmarks.PINKY_TIP, hand_landmarks.PINKY_PIP),
-    ]
+	return max(0, min(5, fingers_up))
 
-    fingers_up = 1 if thumb_up else 0
-    for tip_index, pip_index in finger_pairs:
-        if landmarks[tip_index][1] < landmarks[pip_index][1]:
-            fingers_up += 1
 
-    return max(0, min(5, fingers_up))
 def draw_status(frame, sender_connected, left_count, right_count, right_value):
     connection_status = "connected" if sender_connected else "waiting"
     left_status = "-" if left_count is None else str(left_count)
@@ -128,15 +219,24 @@ def main():
 	right_move_change_threshold = load_thresholds()
 
 	camera = CameraStream()
-	hand_tracker = HandTracker(max_num_hands=2)
+	hand_tracker = HandTracker(
+		max_num_hands=2,
+		min_detection_confidence=0.75,
+		min_tracking_confidence=0.75,
+	)
 	sender = JavaGestureSender()
 
 	last_left_count = None
-	last_right_count = None
+	last_right_fist = None
 	last_right_move_value = None
-	both_fists_active = False
+	both_state = None
 	control_top_ratio = 0.2
 	control_bottom_ratio = 0.8
+	left_count_stable = StableValue(frames_required=3)
+	right_count_stable = StableValue(frames_required=3)
+	right_fist_stable = StableValue(frames_required=4)
+	both_state_stable = StableValue(frames_required=3)
+	right_move_smoother = EmaSmoother(alpha=0.35)
 
 	try:
 		while True:
@@ -151,40 +251,61 @@ def main():
 				left_hand, right_hand = _classify_hands(detected_hands)
 
 				if left_hand is not None:
-					left_count = _count_fingers(left_hand["landmarks"], left_hand.get("handedness", "Left"))
-					if left_count != last_left_count:
+					raw_left_count = _count_fingers(left_hand["landmarks"], left_hand.get("handedness", "Left"))
+					left_count, left_changed = left_count_stable.update(raw_left_count)
+					if left_count is not None and left_changed and left_count != last_left_count:
 						sender.send_event("LEFT", "FIST" if left_count == 0 else str(left_count))
 						last_left_count = left_count
 				else:
+					left_count_stable.clear()
 					last_left_count = None
 
 				if right_hand is not None:
-					right_count = _count_fingers(right_hand["landmarks"], right_hand.get("handedness", "Right"))
-					if right_count != last_right_count:
-						sender.send_event("RIGHT", str(right_count))
-						last_right_count = right_count
+					raw_right_count = _count_fingers(right_hand["landmarks"], right_hand.get("handedness", "Right"))
+					right_count, _ = right_count_stable.update(raw_right_count)
+
+					raw_right_fist = _is_fist(right_hand["landmarks"])
+					right_fist, right_fist_changed = right_fist_stable.update(raw_right_fist)
+					if right_fist is not None and right_fist_changed and right_fist != last_right_fist:
+						sender.send_event("RIGHT", "FIST" if right_fist else "OPEN")
+						last_right_fist = right_fist
 
 					frame_height = frame.shape[0]
 					control_top = int(frame_height * control_top_ratio)
 					control_bottom = int(frame_height * control_bottom_ratio)
 					index_tip_y = right_hand["landmarks"][hand_landmarks.INDEX_FINGER_TIP][1]
-					right_move_value = normalize_vertical_to_midi(index_tip_y, control_top, control_bottom)
+					middle_tip_y = right_hand["landmarks"][hand_landmarks.MIDDLE_FINGER_TIP][1]
+					control_y = int(round((index_tip_y + middle_tip_y) / 2.0))
+					raw_right_move_value = normalize_vertical_to_midi(control_y, control_top, control_bottom)
+					smoothed_value = right_move_smoother.update(raw_right_move_value)
+					right_move_value = _scale_to_cc_cap(smoothed_value)
 
 					if significant_change(last_right_move_value, right_move_value, right_move_change_threshold):
-						normalized = right_move_value / 127.0
-						sender.send_event("RIGHT_MOVE", f"{normalized:.3f}")
+						sender.send_event("RIGHT_MOVE", str(right_move_value))
 						last_right_move_value = right_move_value
 				else:
-					last_right_count = None
+					right_count_stable.clear()
+					right_fist_stable.clear()
+					right_move_smoother.clear()
 					last_right_move_value = None
+					if last_right_fist is not None:
+						sender.send_event("RIGHT", "OPEN")
+						last_right_fist = None
 
-				if left_count == 0 and right_count == 0:
-					if not both_fists_active:
-						sender.send_event("BOTH", "FIST")
-						both_fists_active = True
-				elif both_fists_active and left_count is not None and right_count is not None and left_count > 0 and right_count > 0:
-					sender.send_event("BOTH", "OPEN")
-					both_fists_active = False
+				if left_count is not None and right_count is not None:
+					raw_both_state = None
+					if left_count == 0 and right_count == 0:
+						raw_both_state = "FIST"
+					elif left_count >= 4 and right_count >= 4:
+						raw_both_state = "OPEN"
+
+					stable_both_state, both_changed = both_state_stable.update(raw_both_state)
+					if stable_both_state is not None and both_changed and stable_both_state != both_state:
+						sender.send_event("BOTH", stable_both_state)
+						both_state = stable_both_state
+				else:
+					both_state_stable.clear()
+					both_state = None
 			else:
 				cv2.putText(
 					frame,
@@ -195,9 +316,17 @@ def main():
 					(255, 255, 255),
 					2,
 				)
+				if last_right_fist is not None:
+					sender.send_event("RIGHT", "OPEN")
 				last_left_count = None
-				last_right_count = None
+				last_right_fist = None
 				last_right_move_value = None
+				left_count_stable.clear()
+				right_count_stable.clear()
+				right_fist_stable.clear()
+				both_state_stable.clear()
+				both_state = None
+				right_move_smoother.clear()
 
 			draw_status(frame, sender.is_connected, left_count, right_count, right_move_value)
 

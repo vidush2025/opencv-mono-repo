@@ -110,6 +110,12 @@ public class PythonReceiver {
 		}
 
 		if ("RIGHT".equals(eventName)) {
+			if ("FIST".equalsIgnoreCase(eventValue)) {
+				return new GestureMessage("RIGHT", 0, true);
+			}
+			if ("OPEN".equalsIgnoreCase(eventValue)) {
+				return new GestureMessage("RIGHT", 0, false);
+			}
 			Integer count = parseIntegerSafe(eventValue);
 			if (count != null) {
 				return new GestureMessage("RIGHT", clamp(count.intValue(), 0, 5), true);

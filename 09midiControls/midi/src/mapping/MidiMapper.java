@@ -7,17 +7,20 @@ import midiController.MidiController;
 
 public class MidiMapper {
 	private static final int GESTURE_SLOTS = 5;
+	private static final int MAX_CC_VALUE = (int) Math.round(127.0d * 0.8d);
+	private static final double RIGHT_MOVE_SMOOTHING_ALPHA = 0.35d;
 	private final int defaultChannel;
 	private final int[] controllerNumbers;
 	private final int[] faderValues;
-	private final int[] previousValues;
 	private final int[] lastSentValues;
+	private final double[] smoothedMoveValues;
 	private final int resetValue;
 	private final int muteValue;
+	private final int openValue;
 	private final int faderCount;
 	private int selectedLeftControl;
-	private int selectedRightControl;
 	private boolean muteState;
+	private boolean rightFistActive;
 
 	public MidiMapper(Config config) {
 		defaultChannel = config.getDefaultChannel();
@@ -27,17 +30,18 @@ public class MidiMapper {
 		}
 		controllerNumbers = loadedControllers;
 		faderCount = controllerNumbers.length;
-		resetValue = clamp(config.getResetValue(), 0, 127);
-		muteValue = clamp(config.getMuteValue(), 0, 127);
+		resetValue = clamp(config.getResetValue(), 0, MAX_CC_VALUE);
+		muteValue = clamp(config.getMuteValue(), 0, MAX_CC_VALUE);
+		openValue = MAX_CC_VALUE;
 		faderValues = new int[faderCount];
-		previousValues = new int[faderCount];
 		lastSentValues = new int[faderCount];
-		Arrays.fill(faderValues, resetValue);
-		Arrays.fill(previousValues, resetValue);
+		smoothedMoveValues = new double[faderCount];
+		Arrays.fill(faderValues, clamp(resetValue, 0, MAX_CC_VALUE));
+		Arrays.fill(smoothedMoveValues, -1.0d);
 		Arrays.fill(lastSentValues, -1);
 		selectedLeftControl = 1;
-		// selectedRightControl = 1;
 		muteState = false;
+		rightFistActive = false;
 	}
 
 	public void handleGesture(String gesture, int value, boolean active, MidiController midiController) {
@@ -51,7 +55,7 @@ public class MidiMapper {
 		}
 
 		if ("RIGHT".equals(gesture)) {
-			// handleRightSelection(value);
+			handleRightGesture(value, active, midiController);
 			return;
 		}
 
@@ -64,7 +68,7 @@ public class MidiMapper {
 			if (active) {
 				activateMute(midiController);
 			} else {
-				restoreFromMute(midiController);
+				releaseToOpenLevel(midiController);
 			}
 		}
 	}
@@ -82,48 +86,64 @@ public class MidiMapper {
 		}
 	}
 
-	// private void handleRightSelection(int value) {
-	// 	selectedRightControl = clamp(value, 1, GESTURE_SLOTS);
-	// }
-
 	private void handleRightMove(int value, MidiController midiController) {
-		if (muteState) {
+		if (muteState || rightFistActive) {
 			return;
 		}
 
-		int midiValue = clamp(value, 0, 127);
+		int midiValue = clamp(value, 0, MAX_CC_VALUE);
 
-		// Left hand selection decides target fader(s)
-		if (selectedLeftControl == GESTURE_SLOTS) {
-			for (int index = 0; index < faderCount; index++) {
-				setFaderValue(index, midiValue, midiController);
+		if (selectedLeftControl <= faderCount) {
+			int targetIndex = selectedLeftControl - 1;
+			setFaderValue(targetIndex, smoothMoveValue(targetIndex, midiValue), midiController);
+		}
+	}
+
+	private void handleRightGesture(int value, boolean active, MidiController midiController) {
+		boolean isFist = active && value == 0;
+		if (isFist) {
+			if (!rightFistActive) {
+				rightFistActive = true;
+				muteSelectedFader(midiController);
 			}
 			return;
 		}
 
-		if (selectedLeftControl <= faderCount) {
-			setFaderValue(selectedLeftControl - 1, midiValue, midiController);
-		}
+		rightFistActive = false;
 	}
+
+	private void muteSelectedFader(MidiController midiController) {
+		if (muteState) {
+			return;
+		}
+
+		if (selectedLeftControl <= 0 || selectedLeftControl > faderCount) {
+			return;
+		}
+
+		setFaderValue(selectedLeftControl - 1, muteValue, midiController);
+	}
+
 	private void activateMute(MidiController midiController) {
 		if (muteState) {
 			return;
 		}
 
+		rightFistActive = false;
+
 		for (int index = 0; index < faderCount; index++) {
-			previousValues[index] = faderValues[index];
 			setFaderValue(index, muteValue, midiController);
 		}
 		muteState = true;
 	}
 
-	private void restoreFromMute(MidiController midiController) {
+	private void releaseToOpenLevel(MidiController midiController) {
 		if (!muteState) {
 			return;
 		}
 
 		for (int index = 0; index < faderCount; index++) {
-			setFaderValue(index, previousValues[index], midiController);
+			setFaderValue(index, openValue, midiController);
 		}
 		muteState = false;
 	}
@@ -135,9 +155,25 @@ public class MidiMapper {
 	}
 
 	private void setFaderValue(int index, int value, MidiController midiController) {
-		int safeValue = clamp(value, 0, 127);
+		int safeValue = clamp(value, 0, MAX_CC_VALUE);
 		faderValues[index] = safeValue;
+		smoothedMoveValues[index] = safeValue;
 		sendFaderIfChanged(index, safeValue, midiController);
+	}
+
+	private int smoothMoveValue(int index, int targetValue) {
+		double previous = smoothedMoveValues[index];
+		double smoothed;
+
+		if (previous < 0.0d) {
+			smoothed = targetValue;
+		} else {
+			smoothed = (RIGHT_MOVE_SMOOTHING_ALPHA * targetValue)
+				+ ((1.0d - RIGHT_MOVE_SMOOTHING_ALPHA) * previous);
+		}
+
+		smoothedMoveValues[index] = smoothed;
+		return clamp((int) Math.round(smoothed), 0, MAX_CC_VALUE);
 	}
 
 	private void sendFaderIfChanged(int index, int value, MidiController midiController) {
